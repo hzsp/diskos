@@ -198,10 +198,9 @@ static void bt_disable(void){
     scan_abort();          /* cancel any pending/active scan + the bt_open observer (covers the radio-timeout
                             * OFF path, which reaches here without a caller-side scan_abort) */
     bt_autoroute_stop();
-    system("rm -f /tmp/bt_enabling; "     /* cancel any in-flight bt_enable() subshell first */
-           "bluetoothctl power off >/dev/null 2>&1; hciconfig hci0 down >/dev/null 2>&1; "
-           "killall bluealsa bluetoothd brcm_patchram_plus fiio_bluetoothctl bt-agent 2>/dev/null; "
-           "rfkill block bluetooth >/dev/null 2>&1");
+    system("rm -f /tmp/bt_enabling");     /* cancel any in-flight bt_enable() subshell first */
+    system("( killall -9 fiio_bluetoothctl brcm_patchram_plus bluetoothd bluealsa 2>/dev/null; "
+           "  rfkill block bluetooth >/dev/null 2>&1 ) &");
 }
 
 /* A Bluetooth MAC must be exactly AA:BB:CC:DD:EE:FF (hex + colons) before it is ever

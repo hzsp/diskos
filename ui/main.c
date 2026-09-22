@@ -1597,7 +1597,7 @@ static void *coldplug_thread(void *arg){
                  * it, so a mount can still race an export begun in the window after sd_exported_to_host().
                  * Re-check the REAL gadget state AFTER a successful mount: if the card became host-exported,
                  * unmount immediately (fail-closed) rather than dual-access; the one-shot then gives up. */
-                if(sd_cold_mount_allowed() && mount("/dev/mmcblk0p1", "/tmp/sdcard", "exfat", 0, NULL) == 0){
+                if(sd_cold_mount_allowed() && mount("/dev/mmcblk0p1", "/tmp/sdcard", "exfat", MS_RDONLY, NULL) == 0){
                     if(sd_exported_to_host()){
                         if(umount("/tmp/sdcard") != 0 && umount2("/tmp/sdcard", MNT_DETACH) != 0)
                             coldplug_log("WARNING: post-mount export + unmount BOTH failed (card busy) - possible transient dual-access");
@@ -1605,9 +1605,10 @@ static void *coldplug_thread(void *arg){
                             coldplug_log("post-mount export detected -> unmounted, host owns card (one-shot gives up)");
                         pthread_mutex_unlock(&g_sd_mode_mu); return NULL;    /* explicit: don't fight the host */
                     }
+                    mount("/dev/mmcblk0p1", "/tmp/sdcard", "exfat", MS_REMOUNT, NULL);
                     coldplug_log("SD direct-mounted (V2.40 exfat)"); pthread_mutex_unlock(&g_sd_mode_mu); return NULL;
                 }
-                else if(sd_cold_mount_allowed() && mount("/dev/mmcblk0p1", "/tmp/sdcard", "vfat", 0, NULL) == 0){
+                else if(sd_cold_mount_allowed() && mount("/dev/mmcblk0p1", "/tmp/sdcard", "vfat", MS_RDONLY, NULL) == 0){
                     if(sd_exported_to_host()){
                         if(umount("/tmp/sdcard") != 0 && umount2("/tmp/sdcard", MNT_DETACH) != 0)
                             coldplug_log("WARNING: post-mount export + unmount BOTH failed (card busy) - possible transient dual-access");
@@ -1615,6 +1616,7 @@ static void *coldplug_thread(void *arg){
                             coldplug_log("post-mount export detected -> unmounted, host owns card (one-shot gives up)");
                         pthread_mutex_unlock(&g_sd_mode_mu); return NULL;
                     }
+                    mount("/dev/mmcblk0p1", "/tmp/sdcard", "vfat", MS_REMOUNT, NULL);
                     coldplug_log("SD direct-mounted (V2.40 vfat)"); pthread_mutex_unlock(&g_sd_mode_mu); return NULL;
                 }
                 if(!sd_cold_mount_allowed()){      /* window elapsed / card exported -> give up (one-shot) */

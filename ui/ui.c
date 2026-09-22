@@ -72,6 +72,10 @@ static char g_np_curpath[520];
 static int  g_favp_active = 0, g_favp_val = 0;
 static uint32_t g_favp_set = 0;
 static char g_favp_path[520];
+/* Optimistic play/pause hold: when the user taps play/pause, the UI instantly flips the icon
+ * and holds it for up to 2s to hide backend state-transition delays (especially for pause). */
+static int  g_ppp_active = 0, g_ppp_val = 0;
+static uint32_t g_ppp_set = 0;
 static lv_obj_t *btn_mode;
 static lv_obj_t *mode_icon;
 static lv_obj_t *mode_one;
@@ -295,6 +299,7 @@ static void transport_cb(lv_event_t *e)
     if(!cmd) return;
     ui_defer_sleep();   /* a transport tap changes play state -> don't let the sleep check race a stale read */
     int is_next = !strcmp(cmd, "0201000C0001"), is_prev = !strcmp(cmd, "0201000C0002");
+    int is_pp = !strcmp(cmd, "0201000C0000");
     if(is_next || is_prev){
         track_state_t st; ipc_get_state(&st);
         if(mdb_is_book_path(st.path)){
@@ -313,6 +318,11 @@ static void transport_cb(lv_event_t *e)
         }
         ui_cancel_book_resume();   /* music: next/prev change the track -> drop any pending resume */
         ui_disarm_book_eoc();      /* explicit nav -> disarm any end-of-chapter sleep left armed after a rollover */
+    } else if(is_pp) {
+        g_ppp_active = 1;
+        g_ppp_val = ui_is_playing() ? 1 : 2; /* flip state locally (2=play, 1=pause) */
+        g_ppp_set = lv_tick_get();
+        if(btn_pp) set_label_text_changed(btn_pp, g_ppp_val == 2 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     }
     ipc_send_cmd(cmd);
 }
@@ -382,7 +392,7 @@ static void cover_click_cb(lv_event_t *e)
 static void make_clickable(lv_obj_t *o, const char *cmd)
 {
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(o, 18);
+    lv_obj_set_ext_click_area(o, 10);
     lv_obj_add_event_cb(o, transport_cb, LV_EVENT_CLICKED, (void *)cmd);
 }
 
@@ -1903,13 +1913,20 @@ void ui_update(const track_state_t *st)
 
     progress = (span > 0) ? (int32_t)(((long long)rel * 1000LL) / (long long)span) : 0;
 
+    int pp_state = st->state;
+    if(g_ppp_active){
+        if(st->state == g_ppp_val)                g_ppp_active = 0;   /* player confirmed the value */
+        else if(lv_tick_elaps(g_ppp_set) > 2000)  g_ppp_active = 0;   /* no confirm in 2s -> give up */
+        else                                      pp_state = g_ppp_val;
+    }
+
     /* seek echo-suppression: while the post-seek hold is active and the player
      * is still streaming a stale (far-from-target) position, keep the arc and
      * times pinned at the seeked target instead of snapping back. */
     if(g_seek_hold_until) {
         long d = pos - g_seek_target_ms; if(d < 0) d = -d;   /* ABSOLUTE ms gap - unaffected by a chapter-window flip at a seek-to-boundary */
         if(lv_tick_get() < g_seek_hold_until && d > 3000) {
-            set_label_text_changed(btn_pp, st->state == 2 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+            set_label_text_changed(btn_pp, pp_state == 2 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
             return;   /* ignore this stale echo */
         }
         g_seek_hold_until = 0; g_seek_target_ms = -1;   /* caught up or window lapsed */
@@ -1929,7 +1946,7 @@ void ui_update(const track_state_t *st)
     set_label_text_changed(t_remain, remain_buf);
     set_progress_changed(progress);
 
-    set_label_text_changed(btn_pp, st->state == 2 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    set_label_text_changed(btn_pp, pp_state == 2 ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 }
 
 /* ---- volume overlay: a draggable arc on lv_layer_top (shows over any screen).
